@@ -173,6 +173,32 @@ impl Tree {
     fn add_entry(&mut self, entry: TreeEntry) {
         self.entries.push(entry);
     }
+
+    fn parse(content: &str) -> Self {
+        let mut tree = Self::new();
+        for line in content.lines() {
+            if line.is_empty() {
+                continue;
+            }
+            let parts: Vec<&str> = line.split(' ').collect();
+            if parts.len() == 3 {
+                let mode = match parts[0] {
+                    "100755" => FileMode::Executable,
+                    "040000" => FileMode::Directory,
+                    _ => FileMode::Regular,
+                };
+
+                let content = EntryContent::BlobHash(parts[2].to_string());
+
+                tree.add_entry(TreeEntry {
+                    mode,
+                    name: parts[1].to_string(),
+                    content,
+                });
+            }
+        }
+        tree
+    }
 }
 
 impl Serializable for Tree {
@@ -275,31 +301,43 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     update_head(&commit2_hash)?;
     println!("Commit 2 saved and HEAD updated: {}", commit2_hash);
 
-    show_log()?;
+    let head_hash = fs::read_to_string(".mygit/HEAD")?;
+    let commit_content = load_object(&head_hash)?;
+    let latest_commit = Commit::parse(&commit_content);
+    if let Some(parent_hash) = latest_commit.parent_hash {
+        let parent_content = load_object(&parent_hash)?;
+        let first_commit = Commit::parse(&parent_content);
+
+        println!("Restoring to First commit: {}", parent_hash);
+        // 3. 最初のコミットが指していたTreeの状態を復元！
+        restore_tree(&first_commit.tree_hash)?;
+    }
+
+    // show_log()?;
     return Ok(());
 
-    let args: Vec<String> = env::args().collect();
+    // let args: Vec<String> = env::args().collect();
 
-    if args.len() < 2 {
-        println!("使用法: cargo run -- <ファイル名>");
-        return Ok(());
-    }
+    // if args.len() < 2 {
+    //     println!("使用法: cargo run -- <ファイル名>");
+    //     return Ok(());
+    // }
 
-    let filename = &args[1];
+    // let filename = &args[1];
 
-    // 1. ファイル読み込みに失敗したら即エラーを返して終了
-    let content = fs::read_to_string(filename)?;
+    // // 1. ファイル読み込みに失敗したら即エラーを返して終了
+    // let content = fs::read_to_string(filename)?;
 
-    let blob = Blob::new(filename, &content);
-    let obj = GitObject::Blob(blob);
+    // let blob = Blob::new(filename, &content);
+    // let obj = GitObject::Blob(blob);
 
-    if let GitObject::Blob(inner_blob) = obj {
-        println!("ファイル名: {}", inner_blob.filename);
-        println!("ハッシュ: {}", inner_blob.hash);
+    // if let GitObject::Blob(inner_blob) = obj {
+    //     println!("ファイル名: {}", inner_blob.filename);
+    //     println!("ハッシュ: {}", inner_blob.hash);
 
-        save_object(&inner_blob.hash, &inner_blob.content)?;
-        println!("保存成功！");
-    }
+    //     save_object(&inner_blob.hash, &inner_blob.content)?;
+    //     println!("保存成功！");
+    // }
 
     Ok(())
 }
@@ -355,5 +393,23 @@ fn show_log() -> std::io::Result<()> {
         }
     }
 
+    Ok(())
+}
+
+fn restore_tree(tree_hash: &str) -> std::io::Result<()> {
+    let content = load_object(tree_hash)?;
+    let tree = Tree::parse(&content);
+    for entry in tree.entries {
+        match entry.content {
+            EntryContent::BlobHash(blob_hash) => {
+                let file_content = load_object(&blob_hash)?;
+                fs::write(&entry.name, file_content)?;
+                println!("Restored: {}", entry.name);
+            }
+            EntryContent::SubTree(_) => {
+                println!("SubTree detection (skipping for now): {}", entry.name);
+            }
+        }
+    }
     Ok(())
 }
