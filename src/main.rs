@@ -185,14 +185,9 @@ impl Serializable for Blob {
     }
 }
 
-fn save<T: Serializable>(obj: &T) -> std::io::Result<String> {
-    let content = obj.serialize();
-    let hash = obj.calculate_hash();
-    save_object(&hash, &content)?;
-    Ok(hash)
-}
-
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    fs::create_dir_all(".mygit/objects")?;
+
     let sekine = Author {
         name: "sekine".to_string(),
         email: "sekine@example.com".to_string(),
@@ -212,6 +207,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let commit1 = Commit::new(tree1_hash, None, sekine.clone(), "First Commit".to_string());
     let commit1_hash = save(&commit1)?;
     println!("Commit 1 saved: {}", commit1_hash);
+
+    update_head(&commit1_hash)?;
+    println!("Commit 1 saved and HEAD updated: {}", commit1_hash);
+
+    let blob2 = Blob::new("notes.txt", "Learning Rust is exciting!");
+    save(&blob2)?;
+
+    let mut tree2 = Tree::new();
+    tree2.add_entry(TreeEntry {
+        mode: FileMode::Regular,
+        name: blob2.filename.clone(),
+        content: EntryContent::BlobHash(blob2.hash.clone()),
+    });
+    let tree2_hash = save(&tree2)?;
+
+    let commit2 = Commit::new(
+        tree2_hash,
+        Some(commit1_hash),
+        sekine.clone(),
+        "Second commit: Added notes.txt".to_string(),
+    );
+    let commit2_hash = save(&commit2)?;
+    update_head(&commit2_hash)?;
+    println!("Commit 2 saved and HEAD updated: {}", commit2_hash);
 
     return Ok(());
 
@@ -248,5 +267,18 @@ fn save_object(hash: &str, content: &str) -> std::io::Result<()> {
 
     fs::create_dir_all(&dir_path)?;
     fs::write(file_path, content)?;
+    Ok(())
+}
+
+fn save<T: Serializable>(obj: &T) -> std::io::Result<String> {
+    let content = obj.serialize();
+    let hash = obj.calculate_hash();
+    save_object(&hash, &content)?;
+    Ok(hash)
+}
+
+fn update_head(commit_hash: &str) -> std::io::Result<()> {
+    let head_path = ".mygit/HEAD";
+    fs::write(head_path, commit_hash)?;
     Ok(())
 }
