@@ -282,96 +282,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("Checked out to {}", hash);
             }
         }
+        "commit" => {
+            if args.len() < 3 {
+                println!("メッセージを指定してください");
+            } else {
+                let message = &args[2];
+                let author = Author {
+                    name: "shunitron".to_string(),
+                    email: "shunitron@example.com".to_string(),
+                };
+                run_commit(message, author)?;
+            }
+        }
         _ => {
             println!("不明なコマンドです: {}", command);
         }
     }
-
-    return Ok(());
-
-    fs::create_dir_all(".mygit/objects")?;
-
-    let sekine = Author {
-        name: "sekine".to_string(),
-        email: "sekine@example.com".to_string(),
-    };
-
-    let blob1 = Blob::new("hello.txt", "Hello Rust content");
-    save(&blob1)?;
-
-    let mut tree1 = Tree::new();
-    tree1.add_entry(TreeEntry {
-        mode: FileMode::Regular,
-        name: blob1.filename.clone(),
-        content: EntryContent::BlobHash(blob1.hash.clone()),
-    });
-    let tree1_hash = save(&tree1)?;
-
-    let commit1 = Commit::new(tree1_hash, None, sekine.clone(), "First Commit".to_string());
-    let commit1_hash = save(&commit1)?;
-    println!("Commit 1 saved: {}", commit1_hash);
-
-    update_head(&commit1_hash)?;
-    println!("Commit 1 saved and HEAD updated: {}", commit1_hash);
-
-    let blob2 = Blob::new("notes.txt", "Learning Rust is exciting!");
-    save(&blob2)?;
-
-    let mut tree2 = Tree::new();
-    tree2.add_entry(TreeEntry {
-        mode: FileMode::Regular,
-        name: blob2.filename.clone(),
-        content: EntryContent::BlobHash(blob2.hash.clone()),
-    });
-    let tree2_hash = save(&tree2)?;
-
-    let commit2 = Commit::new(
-        tree2_hash,
-        Some(commit1_hash),
-        sekine.clone(),
-        "Second commit: Added notes.txt".to_string(),
-    );
-    let commit2_hash = save(&commit2)?;
-    update_head(&commit2_hash)?;
-    println!("Commit 2 saved and HEAD updated: {}", commit2_hash);
-
-    let head_hash = fs::read_to_string(".mygit/HEAD")?;
-    let commit_content = load_object(&head_hash)?;
-    let latest_commit = Commit::parse(&commit_content);
-    if let Some(parent_hash) = latest_commit.parent_hash {
-        let parent_content = load_object(&parent_hash)?;
-        let first_commit = Commit::parse(&parent_content);
-
-        println!("Restoring to First commit: {}", parent_hash);
-        // 3. 最初のコミットが指していたTreeの状態を復元！
-        restore_tree(&first_commit.tree_hash)?;
-    }
-
-    // show_log()?;
-    return Ok(());
-
-    // let args: Vec<String> = env::args().collect();
-
-    // if args.len() < 2 {
-    //     println!("使用法: cargo run -- <ファイル名>");
-    //     return Ok(());
-    // }
-
-    // let filename = &args[1];
-
-    // // 1. ファイル読み込みに失敗したら即エラーを返して終了
-    // let content = fs::read_to_string(filename)?;
-
-    // let blob = Blob::new(filename, &content);
-    // let obj = GitObject::Blob(blob);
-
-    // if let GitObject::Blob(inner_blob) = obj {
-    //     println!("ファイル名: {}", inner_blob.filename);
-    //     println!("ハッシュ: {}", inner_blob.hash);
-
-    //     save_object(&inner_blob.hash, &inner_blob.content)?;
-    //     println!("保存成功！");
-    // }
 
     Ok(())
 }
@@ -445,5 +371,42 @@ fn restore_tree(tree_hash: &str) -> std::io::Result<()> {
             }
         }
     }
+    Ok(())
+}
+
+fn run_commit(message: &str, author: Author) -> Result<(), Box<dyn std::error::Error>> {
+    let mut tree = Tree::new();
+    let entries = fs::read_dir(".")?;
+
+    for entry in entries {
+        let entry = entry?;
+        let file_name: String = entry.file_name().into_string().unwrap();
+
+        if file_name.starts_with('.') || file_name == "target" || entry.path().is_dir() {
+            continue;
+        }
+
+        let content = fs::read_to_string(entry.path())?;
+        let blob = Blob::new(&file_name, &content);
+        save(&blob)?;
+
+        tree.add_entry(TreeEntry {
+            mode: FileMode::Regular,
+            name: file_name,
+            content: EntryContent::BlobHash(blob.hash),
+        });
+    }
+
+    let tree_hash = save(&tree)?;
+
+    let parent_hash = fs::read_to_string(".mygit/HEAD").ok();
+
+    let new_commit = Commit::new(tree_hash, parent_hash, author, message.to_string());
+    let new_commit_hash: String = save(&new_commit)?;
+
+    update_head(&new_commit_hash)?;
+
+    println!("Committed: {}", new_commit_hash);
+
     Ok(())
 }
