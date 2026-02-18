@@ -255,6 +255,40 @@ impl Serializable for Blob {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args: Vec<String> = env::args().collect();
+
+    if args.len() < 2 {
+        println!("使用法:");
+        println!("  cargo run -- log              : コミットログを表示");
+        println!("  cargo run -- checkout <hash>  : 特定のハッシュを復元");
+        println!("  cargo run -- commit <message> : (未実装) 現在の状態でコミット");
+        return Ok(());
+    }
+
+    let command = &args[1];
+    match command.as_str() {
+        "log" => {
+            show_log()?;
+        }
+        "checkout" => {
+            if args.len() < 3 {
+                println!("ハッシュを指定してください");
+            } else {
+                let hash = &args[2];
+                let content = load_object(hash)?;
+                let commit = Commit::parse(&content);
+                restore_tree(&commit.tree_hash)?;
+                update_head(hash)?;
+                println!("Checked out to {}", hash);
+            }
+        }
+        _ => {
+            println!("不明なコマンドです: {}", command);
+        }
+    }
+
+    return Ok(());
+
     fs::create_dir_all(".mygit/objects")?;
 
     let sekine = Author {
