@@ -47,6 +47,49 @@ impl Commit {
             timestamp,
         }
     }
+
+    fn parse(content: &str) -> Self {
+        let mut tree_hash = String::new();
+        let mut parent_hash = None;
+        let mut author_name = String::new();
+        let mut author_email = String::new();
+        let mut timestamp = 0;
+        let mut message = String::new();
+
+        let lines: Vec<&str> = content.lines().collect();
+        let mut body_start_index = 0;
+        for (i, line) in lines.iter().enumerate() {
+            if line.is_empty() {
+                body_start_index = i + 1;
+                break;
+            }
+            let parts: Vec<&str> = line.splitn(2, ' ').collect();
+            match parts[0] {
+                "tree" => tree_hash = parts[1].to_string(),
+                "parent" => parent_hash = Some(parts[1].to_string()),
+                "author" => {
+                    let author_parts: Vec<&str> = parts[1].split(' ').collect();
+                    author_name = author_parts[0].to_string();
+                    author_email = author_parts[1].replace(['<', '>'], "");
+                    timestamp = author_parts[2].parse().unwrap_or(0);
+                }
+                _ => {}
+            }
+        }
+
+        message = lines[body_start_index..].join("\n");
+
+        Self {
+            tree_hash,
+            parent_hash,
+            author: Author {
+                name: author_name,
+                email: author_email,
+            },
+            message,
+            timestamp,
+        }
+    }
 }
 
 impl Serializable for Commit {
@@ -232,6 +275,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     update_head(&commit2_hash)?;
     println!("Commit 2 saved and HEAD updated: {}", commit2_hash);
 
+    show_log()?;
     return Ok(());
 
     let args: Vec<String> = env::args().collect();
@@ -280,5 +324,36 @@ fn save<T: Serializable>(obj: &T) -> std::io::Result<String> {
 fn update_head(commit_hash: &str) -> std::io::Result<()> {
     let head_path = ".mygit/HEAD";
     fs::write(head_path, commit_hash)?;
+    Ok(())
+}
+
+fn load_object(hash: &str) -> std::io::Result<String> {
+    let (dir_name, file_name) = hash.split_at(2);
+    let file_path = format!(".mygit/objects/{}/{}", dir_name, file_name);
+    fs::read_to_string(file_path)
+}
+
+fn show_log() -> std::io::Result<()> {
+    let mut current_hash = fs::read_to_string(".mygit/HEAD")?;
+
+    println!("--- Commit History ---");
+
+    loop {
+        let content = load_object(&current_hash)?;
+        let commit = Commit::parse(&content);
+        // 3. 表示
+        println!("commit {}", current_hash);
+        println!("Author: {} <{}>", commit.author.name, commit.author.email);
+        println!("\n    {}", commit.message);
+        println!("-----------------------");
+
+        // 4. 親がいれば次へ、いなければ終了
+        if let Some(parent) = commit.parent_hash {
+            current_hash = parent;
+        } else {
+            break;
+        }
+    }
+
     Ok(())
 }
